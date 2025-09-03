@@ -1,6 +1,6 @@
 // src/components/QuestView.tsx
 import { memo, useMemo, useState } from "react";
-import type { DayPlan } from "@/utils/types";
+import type { DayPlan, Theme } from "@/utils/types";
 import { POINTS_PER_QUEST, DAILY_BONUS_POINTS } from "@/utils/constants";
 
 type ViewMode = "today" | "week";
@@ -11,13 +11,16 @@ export const QuestView = memo(function QuestView({
   onToggleDone,
   onToggleEnabled,
   onToggleDayEnabled,
+  theme,
 }: {
   plans: DayPlan[];
   todayIndex: number;
   onToggleDone: (dayIdx: number, qid: string) => void;
   onToggleEnabled: (dayIdx: number, qid: string) => void;
   onToggleDayEnabled: (dayIdx: number, enabled: boolean) => void;
+  theme?: Theme;
 }) {
+  const isDark = theme?.backgroundColor === "#000000";
   const [view, setView] = useState<ViewMode>("today");
 
   const entries = useMemo(

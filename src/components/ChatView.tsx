@@ -11,21 +11,27 @@ import {
   Paperclip,
   X,
 } from "lucide-react";
-import type { ChatMsg, CategoryKey } from "@/utils/types";
+import type { ChatMsg, CategoryKey, Theme } from "@/utils/types";
 import { ALL_CATEGORIES, TEMPLATE_QUESTS } from "@/utils/constants";
 import { VoiceInput } from "./VoiceInput";
 import { FileAttachment } from "./FileAttachment";
 
 export const ChatView = memo(function ChatView({
   onReplaceQuest, // 親へ置き換え依頼するコールバック
+  onAddQuest, // 親へクエスト追加依頼するコールバック
+  theme, // テーマ設定
 }: {
   onReplaceQuest?: (payload: { category: CategoryKey; newTitle: string }) => void;
+  onAddQuest?: (questTitle: string, dayIndex: number, category?: CategoryKey) => void;
+  theme?: Theme;
 }) {
+  const isDark = theme?.backgroundColor === "#000000";
   const [messages, setMessages] = useState<ChatMsg[]>([
     { role: "assistant", content: "River Agentです！ 何でもお聞きください 🤖" },
     { role: "assistant", content: "こんにちは！今日はどのようなことでお手伝いできますか？" },
   ]);
   const [isTyping, setIsTyping] = useState(false);
+  const [suggestedQuests, setSuggestedQuests] = useState<string[]>([]);
 
   // クエスト追加パネル
   const [openEdit, setOpenEdit] = useState(false);
@@ -33,7 +39,32 @@ export const ChatView = memo(function ChatView({
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  const handleSubmit = (text: string, attachments?: AttachedFile[]) => {
+  // AIの応答からクエスト提案を抽出する関数
+  const extractQuestSuggestions = (content: string): string[] => {
+    const quests: string[] = [];
+    
+    // 箇条書き（- や • や数字で始まる行）を検出
+    const lines = content.split('\n');
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      
+      // - や • で始まる行
+      if (trimmed.match(/^[-•]\s*.+/)) {
+        const quest = trimmed.replace(/^[-•]\s*/, '').trim();
+        if (quest.length > 0) quests.push(quest);
+      }
+      
+      // 1. 2. などの番号で始まる行
+      if (trimmed.match(/^\d+\.\s*.+/)) {
+        const quest = trimmed.replace(/^\d+\.\s*/, '').trim();
+        if (quest.length > 0) quests.push(quest);
+      }
+    });
+    
+    return quests.slice(0, 5); // 最大5個まで
+  };
+
+  const handleSubmit = async (text: string, attachments?: AttachedFile[]) => {
     const t = text.trim();
     if (!t && (!attachments || attachments.length === 0)) return;
 
@@ -58,11 +89,37 @@ export const ChatView = memo(function ChatView({
     }
 
     setIsTyping(true);
-    const reply = mockAssistant(t);
-    setTimeout(() => {
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    
+    try {
+      const apiKey = localStorage.getItem("openai_api_key");
+      
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: t, apiKey }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const assistantMessage = { role: "assistant", content: data.response };
+        setMessages((prev) => [...prev, assistantMessage]);
+        
+        // AIの応答からクエスト提案を抽出
+        const suggestions = extractQuestSuggestions(data.response);
+        if (suggestions.length > 0) {
+          setSuggestedQuests(suggestions);
+        }
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", content: "申し訳ございませんが、現在応答できません。しばらくしてから再度お試しください。" }]);
+      }
+    } catch (error) {
+      console.error('チャットエラー:', error);
+      setMessages((prev) => [...prev, { role: "assistant", content: "エラーが発生しました。しばらくしてから再度お試しください。" }]);
+    } finally {
       setIsTyping(false);
-    }, Math.min(1200, Math.max(300, reply.length * 25)));
+    }
   };
 
   useEffect(() => {
@@ -178,6 +235,48 @@ export const ChatView = memo(function ChatView({
             >
               クエスト追加
             </SuggestChip>
+          </div>
+        )}
+
+        {/* AI提案クエスト選択UI */}
+        {suggestedQuests.length > 0 && (
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-blue-800">提案されたクエスト</h3>
+              <button
+                onClick={() => setSuggestedQuests([])}
+                className="rounded p-1 text-blue-600 hover:bg-blue-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {suggestedQuests.map((quest, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between gap-2 rounded-lg bg-white p-2 shadow-sm"
+                >
+                  <span className="text-sm text-gray-800 flex-1">{quest}</span>
+                  <div className="flex gap-1">
+                    {[0, 1, 2, 3, 4, 5, 6].map(dayIndex => (
+                      <button
+                        key={dayIndex}
+                        onClick={() => {
+                          if (onAddQuest) {
+                            onAddQuest(quest, dayIndex, "習慣");
+                            setSuggestedQuests(prev => prev.filter((_, i) => i !== index));
+                          }
+                        }}
+                        className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+                        title={`Day ${dayIndex + 1}に追加`}
+                      >
+                        {dayIndex + 1}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -419,15 +518,3 @@ const ChatInput = memo(function ChatInput({
 });
 
 
-/* --- 簡易応答 --- */
-function mockAssistant(input: string): string {
-  if (/進捗|status|ステータス/.test(input))
-    return "現在の進捗を要約します。まずはタスク一覧を共有してください。";
-  if (/データ|分析/.test(input))
-    return "CSVかスプレッドシートをアップロードいただければ、概要統計→可視化→所見まで出します。";
-  const picks = ["運動", "学習", "読書", "瞑想", "料理", "プログラミング", "語学"]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, 3)
-    .join("、");
-  return `${picks}などがおすすめです！クエスト追加から選んでみてください。`;
-}

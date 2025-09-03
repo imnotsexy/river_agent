@@ -24,7 +24,7 @@ export default function Page() {
 
   useEffect(() => {
     const s = loadState();
-    if (s) {
+    if (s && s.plans?.length) {
       setState(s);
       if (!s.plans?.length && s.selectedCategories?.length) setSelected(s.selectedCategories);
     }
@@ -73,18 +73,46 @@ export default function Page() {
     if (typeof window !== "undefined") localStorage.removeItem("growth-planner-v1");
   }, []);
 
+  const addQuestToPlans = useCallback((questTitle: string, dayIndex: number, category?: CategoryKey) => {
+    if (!state) return;
+    const copy: AppState = JSON.parse(JSON.stringify(state));
+    
+    // 新しいクエストを作成
+    const newQuest = {
+      id: Date.now().toString(),
+      title: questTitle,
+      category: category || "習慣",
+      done: false,
+      enabled: true,
+      points: 10
+    };
+    
+    // 指定された日にクエストを追加
+    if (copy.plans[dayIndex]) {
+      copy.plans[dayIndex].quests.push(newQuest);
+      setState(copy);
+      saveState(copy);
+    }
+  }, [state]);
+
   // 初回ウィザード（プラン未作成）
   if (!hasPlan) {
     const toggleCategory = (key: CategoryKey) => setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
     const generate = () => {
-      const base = selected.length ? selected : (["運動", "学習"] as CategoryKey[]);
-      const plans = buildWeekPlan(base);
-      const next: AppState = { selectedCategories: base, plans, createdAt: new Date().toISOString() };
+      if (selected.length === 0) {
+        alert("最低1つの分野を選択してください");
+        return;
+      }
+      const plans = buildWeekPlan(selected);
+      const next: AppState = { selectedCategories: selected, plans, createdAt: new Date().toISOString() };
       setState(next);
       saveState(next);
     };
     return (
-      <main className="mx-auto max-w-screen-sm p-4 text-black">
+      <main className="mx-auto max-w-screen-sm p-4 transition-colors" style={{
+        backgroundColor: "#f7f7f7",
+        color: "#111111"
+      }}>
         <h1 className="mb-4 text-xl font-semibold">どんな分野を伸ばしたい？</h1>
         <p className="mb-3 text-sm text-neutral-600">3つ前後選ぶのがおすすめ（後で変更できます）</p>
         <div className="grid grid-cols-3 gap-3">
@@ -95,29 +123,63 @@ export default function Page() {
             );
           })}
         </div>
-        <div className="mt-6 flex items-center justify-between">
-          <button onClick={generate} className="rounded-xl bg-neutral-900 px-4 py-2 text-white shadow hover:bg-neutral-800">7日間プランを作成</button>
-          <button onClick={() => setSelected([])} className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-800">選択をクリア</button>
+        <div className="mt-6 space-y-3">
+          {selected.length > 0 && (
+            <div className="text-sm text-neutral-600">
+              選択中: {selected.join("、")} ({selected.length}個)
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <button 
+              onClick={generate} 
+              disabled={selected.length === 0}
+              className={`rounded-xl px-4 py-2 shadow transition ${
+                selected.length === 0 
+                  ? "bg-neutral-300 text-neutral-500 cursor-not-allowed" 
+                  : "bg-neutral-900 text-white hover:bg-neutral-800"
+              }`}
+            >
+              7日間プランを作成 {selected.length === 0 ? "(分野を選択してください)" : ""}
+            </button>
+            {selected.length > 0 && (
+              <button onClick={() => setSelected([])} className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-800">
+                選択をクリア
+              </button>
+            )}
+          </div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-dvh bg-[var(--background)] text-[var(--foreground)]">
+    <main className={`min-h-dvh transition-colors ${state?.theme?.backgroundColor === "#000000" ? "dark" : ""}`} style={{
+      backgroundColor: state?.theme?.backgroundColor || "#f7f7f7",
+      color: state?.theme?.textColor || "#111111"
+    }}>
       <style jsx global>{`
-        :root { --background: #f7f7f7; --foreground: #111111; }
-        .dark { --background: #0a0a0a; --foreground: #e5e5e5; }
+        :root { 
+          --background: ${state?.theme?.backgroundColor || "#f7f7f7"}; 
+          --foreground: ${state?.theme?.textColor || "#111111"}; 
+        }
+        .dark { 
+          --background: #0a0a0a; 
+          --foreground: #e5e5e5; 
+        }
+        body {
+          background-color: ${state?.theme?.backgroundColor || "#f7f7f7"};
+          color: ${state?.theme?.textColor || "#111111"};
+        }
       `}</style>
       <div className="mx-auto max-w-4xl px-4 pb-24 pt-6 lg:px-6">
         <Header />
         {tab === "ホーム" && (
-          <HomeView username="勇者タクロウ" plans={state!.plans} createdAt={state!.createdAt} onOpenQuest={() => setTab("クエスト")} />
+          <HomeView username="勇者タクロウ" plans={state!.plans} createdAt={state!.createdAt} onOpenQuest={() => setTab("クエスト")} theme={state!.theme} />
         )}
         {tab === "クエスト" && (
-          <QuestView plans={state!.plans} todayIndex={todayIndex} onToggleDone={toggleDone} onToggleEnabled={toggleEnabled} onToggleDayEnabled={setDayEnabledAll} />
+          <QuestView plans={state!.plans} todayIndex={todayIndex} onToggleDone={toggleDone} onToggleEnabled={toggleEnabled} onToggleDayEnabled={setDayEnabledAll} theme={state!.theme} />
         )}
-        {tab === "チャット" && <ChatView />}
+        {tab === "チャット" && <ChatView onAddQuest={addQuestToPlans} theme={state!.theme} />}
         {tab === "設定" && (
           <SettingsView
             onReset={resetAll}

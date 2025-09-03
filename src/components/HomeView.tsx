@@ -2,19 +2,22 @@
 import { memo, useMemo } from "react";
 import { calculateRank } from "@/utils/helpers";
 import { POINTS_PER_QUEST, rankOrder, DAILY_BONUS_POINTS } from "@/utils/constants";
-import type { DayPlan, Rank } from "@/utils/types";
+import type { DayPlan, Rank, Theme } from "@/utils/types";
 
 export const HomeView = memo(function HomeView({
   username,
   plans,
   createdAt,
   onOpenQuest,
+  theme,
 }: {
   username: string;
   plans: DayPlan[];
   createdAt?: string;
   onOpenQuest: () => void;
+  theme?: Theme;
 }) {
+  const isDark = theme?.backgroundColor === "#000000";
   const todayIndex = useMemo(() => {
     if (!createdAt) return 0;
     const diffMs = Date.now() - new Date(createdAt).getTime();
@@ -82,7 +85,7 @@ export const HomeView = memo(function HomeView({
 
   return (
     <>
-      <section className="mb-6 rounded-2xl border bg-white/80 p-4 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-white/5">
+      <section className={`mb-6 rounded-2xl border p-4 shadow-sm backdrop-blur-sm ${isDark ? "border-white/10 bg-gray-800/80" : "border-gray-200 bg-white/80"}`}>
         <div className="flex items-start gap-4">
           <div className="grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-blue-100 to-indigo-100 text-lg font-bold text-blue-700 dark:from-sky-900/40 dark:to-indigo-900/40 dark:text-sky-200">
             👦
@@ -94,13 +97,13 @@ export const HomeView = memo(function HomeView({
             </div>
 
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <KPI title="所持ポイント" value={totalPoints.toLocaleString()} />
-              <div className="rounded-2xl border bg-white/80 p-4 text-center shadow-sm dark:border-white/10 dark:bg-white/5">
-                <div className="text-xs text-neutral-500">ランク</div>
+              <KPI title="所持ポイント" value={totalPoints.toLocaleString()} isDark={isDark} />
+              <div className={`rounded-2xl border p-4 text-center shadow-sm ${isDark ? "border-white/10 bg-gray-800/80" : "border-gray-200 bg-white/80"}`}>
+                <div className={`text-xs ${isDark ? "text-gray-400" : "text-neutral-500"}`}>ランク</div>
                 <div className="mt-1 text-lg font-semibold">{currentRank}</div>
-                <div className="mt-1 text-xs text-neutral-500">次まで {toNext.toLocaleString()} pt</div>
+                <div className={`mt-1 text-xs ${isDark ? "text-gray-400" : "text-neutral-500"}`}>次まで {toNext.toLocaleString()} pt</div>
               </div>
-              <KPI title="今週の達成率" value={`${weekProgress}%`} />
+              <KPI title="今週の達成率" value={`${weekProgress}%`} isDark={isDark} />
             </div>
 
             <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-white/10">
@@ -181,18 +184,18 @@ export const HomeView = memo(function HomeView({
       </section>
 
       <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <KPI title="完了クエスト" value={`${doneCount}/${totalCount}`} />
-        <KPI title="獲得ポイント" value={`${todayEarned}`} />
-        <KPI title="達成率" value={`${achievementRate}%`} />
+        <KPI title="完了クエスト" value={`${doneCount}/${totalCount}`} isDark={isDark} />
+        <KPI title="獲得ポイント" value={`${todayEarned}`} isDark={isDark} />
+        <KPI title="達成率" value={`${achievementRate}%`} isDark={isDark} />
       </section>
     </>
   );
 });
 
-const KPI = memo(function KPI({ title, value }: { title: string; value: string }) {
+const KPI = memo(function KPI({ title, value, isDark }: { title: string; value: string; isDark?: boolean }) {
   return (
-    <div className="rounded-2xl border bg-white/80 p-4 text-center shadow-sm dark:border-white/10 dark:bg-white/5">
-      <div className="text-xs text-neutral-500">{title}</div>
+    <div className={`rounded-2xl border p-4 text-center shadow-sm ${isDark ? "border-white/10 bg-gray-800/80" : "border-gray-200 bg-white/80"}`}>
+      <div className={`text-xs ${isDark ? "text-gray-400" : "text-neutral-500"}`}>{title}</div>
       <div className="mt-1 text-2xl font-semibold">{value}</div>
     </div>
   );
