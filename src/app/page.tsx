@@ -1,103 +1,135 @@
-import Image from "next/image";
+// src/app/page.tsx
+"use client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 
-export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+import { Header } from "../components/Header";
+import { BottomNav, type Tab } from "../components/BottomNav";
+import { HomeView } from "../components/HomeView";
+import { QuestView } from "../components/QuestView";
+import { SettingsView } from "../components/SettingsView";
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+
+
+import { ALL_CATEGORIES, DEFAULT_THEME } from "@/utils/constants";
+import { buildWeekPlan, loadState, saveState } from "@/utils/helpers";
+import type { AppState, CategoryKey, Theme } from "@/utils/types";
+
+const ChatView = dynamic(() => import("@/components/ChatView").then((m) => m.ChatView), { ssr: false });
+
+export default function Page() {
+  const [tab, setTab] = useState<Tab>("ホーム");
+  const [state, setState] = useState<AppState | null>(null);
+  const [selected, setSelected] = useState<CategoryKey[]>([]);
+
+  useEffect(() => {
+    const s = loadState();
+    if (s) {
+      setState(s);
+      if (!s.plans?.length && s.selectedCategories?.length) setSelected(s.selectedCategories);
+    }
+  }, []);
+
+  const hasPlan = !!state?.plans?.length;
+
+  const todayIndex = useMemo(() => {
+    if (!state?.createdAt) return 0;
+    const diffMs = Date.now() - new Date(state.createdAt).getTime();
+    return Math.max(0, Math.min(6, Math.floor(diffMs / 86400000)));
+  }, [state?.createdAt]);
+
+  const toggleDone = useCallback((dayIdx: number, qid: string) => {
+    if (!state) return;
+    const copy: AppState = JSON.parse(JSON.stringify(state));
+    const q = copy.plans[dayIdx].quests.find((x) => x.id === qid);
+    if (!q || !q.enabled) return;
+    q.done = !q.done;
+    setState(copy);
+    saveState(copy);
+  }, [state]);
+
+  const toggleEnabled = useCallback((dayIdx: number, qid: string) => {
+    if (!state) return;
+    const copy: AppState = JSON.parse(JSON.stringify(state));
+    const q = copy.plans[dayIdx].quests.find((x) => x.id === qid);
+    if (!q) return;
+    q.enabled = !q.enabled;
+    if (!q.enabled) q.done = false;
+    setState(copy);
+    saveState(copy);
+  }, [state]);
+
+  const setDayEnabledAll = useCallback((dayIdx: number, enabled: boolean) => {
+    if (!state) return;
+    const copy: AppState = JSON.parse(JSON.stringify(state));
+    copy.plans[dayIdx].quests = copy.plans[dayIdx].quests.map((q) => ({ ...q, enabled, done: enabled ? q.done : false }));
+    setState(copy);
+    saveState(copy);
+  }, [state]);
+
+  const resetAll = useCallback(() => {
+    setState(null);
+    setSelected([]);
+    if (typeof window !== "undefined") localStorage.removeItem("growth-planner-v1");
+  }, []);
+
+  // 初回ウィザード（プラン未作成）
+  if (!hasPlan) {
+    const toggleCategory = (key: CategoryKey) => setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+    const generate = () => {
+      const base = selected.length ? selected : (["運動", "学習"] as CategoryKey[]);
+      const plans = buildWeekPlan(base);
+      const next: AppState = { selectedCategories: base, plans, createdAt: new Date().toISOString() };
+      setState(next);
+      saveState(next);
+    };
+    return (
+      <main className="mx-auto max-w-screen-sm p-4 text-black">
+        <h1 className="mb-4 text-xl font-semibold">どんな分野を伸ばしたい？</h1>
+        <p className="mb-3 text-sm text-neutral-600">3つ前後選ぶのがおすすめ（後で変更できます）</p>
+        <div className="grid grid-cols-3 gap-3">
+          {ALL_CATEGORIES.map((c) => {
+            const active = selected.includes(c.key);
+            return (
+              <button key={c.key} onClick={() => toggleCategory(c.key)} className={`rounded-2xl border p-4 text-sm shadow-sm transition ${active ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white hover:bg-neutral-50"}`}>{c.label}</button>
+            );
+          })}
+        </div>
+        <div className="mt-6 flex items-center justify-between">
+          <button onClick={generate} className="rounded-xl bg-neutral-900 px-4 py-2 text-white shadow hover:bg-neutral-800">7日間プランを作成</button>
+          <button onClick={() => setSelected([])} className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-800">選択をクリア</button>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+    );
+  }
+
+  return (
+    <main className="min-h-dvh bg-[var(--background)] text-[var(--foreground)]">
+      <style jsx global>{`
+        :root { --background: #f7f7f7; --foreground: #111111; }
+        .dark { --background: #0a0a0a; --foreground: #e5e5e5; }
+      `}</style>
+      <div className="mx-auto max-w-4xl px-4 pb-24 pt-6 lg:px-6">
+        <Header />
+        {tab === "ホーム" && (
+          <HomeView username="勇者タクロウ" plans={state!.plans} createdAt={state!.createdAt} onOpenQuest={() => setTab("クエスト")} />
+        )}
+        {tab === "クエスト" && (
+          <QuestView plans={state!.plans} todayIndex={todayIndex} onToggleDone={toggleDone} onToggleEnabled={toggleEnabled} onToggleDayEnabled={setDayEnabledAll} />
+        )}
+        {tab === "チャット" && <ChatView />}
+        {tab === "設定" && (
+          <SettingsView
+            onReset={resetAll}
+            theme={state!.theme ?? (DEFAULT_THEME as Theme)}
+            onThemeChange={(theme) => {
+              setState((prev) => (prev ? { ...prev, theme } : null));
+              if (state) saveState({ ...state, theme });
+            }}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+        )}
+      </div>
+      <BottomNav tab={tab} onChange={setTab} />
+    </main>
   );
 }
