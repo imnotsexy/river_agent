@@ -1,44 +1,41 @@
+// src/app/api/validate-key/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI, { APIError } from "openai";
 
-type ValidateKeyBody = { apiKey: string };
+export async function POST(request: NextRequest) {
+  // JSONは unknown で受けて安全に取り出す
+  const raw = await request.json().catch(() => null) as unknown;
+  const apiKey =
+    typeof raw === "object" &&
+    raw !== null &&
+    typeof (raw as { apiKey?: unknown }).apiKey === "string"
+      ? (raw as { apiKey: string }).apiKey
+      : "";
 
-function isValidateKeyBody(x: unknown): x is ValidateKeyBody {
-  return typeof x === "object" && x !== null && typeof (x as { apiKey?: unknown }).apiKey === "string";
-}
-
-export async function POST(request: NextRequest): Promise<NextResponse> {
-  // JSONは unknown として受ける
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "不正なJSONです" }, { status: 400 });
-  }
-
-  if (!isValidateKeyBody(body) || body.apiKey.length === 0) {
+  if (!apiKey) {
     return NextResponse.json({ error: "APIキーが必要です" }, { status: 400 });
   }
 
-  const openai = new OpenAI({ apiKey: body.apiKey });
+  const openai = new OpenAI({ apiKey });
 
   try {
-    // 認証チェック：失敗すると APIError が投げられる
     await openai.models.list();
     return NextResponse.json({ valid: true });
   } catch (err: unknown) {
-    // OpenAI のエラーならステータスで分岐
+    // OpenAI SDK の型で安全に分岐
     if (err instanceof APIError) {
       if (err.status === 401) {
         return NextResponse.json({ error: "APIキーが無効です" }, { status: 401 });
       }
-      // 他のAPIエラー
-      return NextResponse.json({ error: err.message ?? "OpenAI API エラー" }, { status: err.status ?? 500 });
+      return NextResponse.json(
+        { error: err.message ?? "OpenAI API エラー" },
+        { status: err.status ?? 500 }
+      );
     }
 
-    // それ以外の想定外エラー
-    const message = err instanceof Error ? err.message : "APIキーの検証に失敗しました";
+    // 想定外エラー
     console.error("API key validation error:", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const msg = err instanceof Error ? err.message : "APIキーの検証に失敗しました";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
