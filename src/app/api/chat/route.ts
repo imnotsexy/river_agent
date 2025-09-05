@@ -20,8 +20,11 @@ export async function POST(request: NextRequest) {
       apiKey: finalApiKey,
     });
 
+    // 環境変数からファインチューニングモデルIDを取得、なければデフォルト値を使用
+    const modelId = process.env.OPENAI_FINETUNED_MODEL || "ft:gpt-4o-2024-08-06:kimurist:jmultiwoz-dialogue:CC4srHVS";
+
     const completion = await openai.chat.completions.create({
-      model: "ft:gpt-4o-mini-2024-07-18:kimurist:travel-jp-gpu:CBaBln2U",
+      model: modelId,
       messages: [
         {
           role: "system",

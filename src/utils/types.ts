@@ -54,3 +54,11 @@ export type Rank =
 | "侯爵 (Marquis)"
 | "公爵 (Duke)"
 | "王者 (Sovereign)";
+
+export type ChatHistory = {
+  id: string;
+  title: string;
+  messages: ChatMsg[];
+  createdAt: string;
+  updatedAt: string;
+};

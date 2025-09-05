@@ -13,30 +13,43 @@ import { SettingsView } from "../components/SettingsView";
 
 import { ALL_CATEGORIES, DEFAULT_THEME } from "@/utils/constants";
 import { buildWeekPlan, loadState, saveState } from "@/utils/helpers";
-import type { AppState, CategoryKey, Theme } from "@/utils/types";
+import type { AppState, CategoryKey, Theme, ChatHistory, ChatMsg } from "@/utils/types";
 
 const ChatView = dynamic(() => import("@/components/ChatView").then((m) => m.ChatView), { ssr: false });
+const ChatHistoryView = dynamic(() => import("@/components/ChatHistoryView").then((m) => m.ChatHistoryView), { ssr: false });
 
 export default function Page() {
   const [tab, setTab] = useState<Tab>("ホーム");
   const [state, setState] = useState<AppState | null>(null);
   const [selected, setSelected] = useState<CategoryKey[]>([]);
-
-  useEffect(() => {
-    const s = loadState();
-    if (s && s.plans?.length) {
-      setState(s);
-      if (!s.plans?.length && s.selectedCategories?.length) setSelected(s.selectedCategories);
-    }
-  }, []);
-
-  const hasPlan = !!state?.plans?.length;
+  const [showInitialSetup, setShowInitialSetup] = useState(true); // デフォルトをtrueに変更
+  const [isLoading, setIsLoading] = useState(true); // ローディング状態を追加
+  const [showChatHistory, setShowChatHistory] = useState(false);
+  const [currentChatHistory, setCurrentChatHistory] = useState<ChatHistory | null>(null);
 
   const todayIndex = useMemo(() => {
     if (!state?.createdAt) return 0;
     const diffMs = Date.now() - new Date(state.createdAt).getTime();
     return Math.max(0, Math.min(6, Math.floor(diffMs / 86400000)));
   }, [state?.createdAt]);
+
+  useEffect(() => {
+    const s = loadState();
+    // 既存のデータがあり、かつ3つ選択済みでプランがある場合のみ初期設定をスキップ
+    if (s && s.selectedCategories && s.selectedCategories.length === 3 && s.plans?.length > 0) {
+      setState(s);
+      setShowInitialSetup(false);
+    } else {
+      // それ以外は全て初期設定画面を表示
+      setShowInitialSetup(true);
+      if (s?.selectedCategories) {
+        setSelected(s.selectedCategories);
+      }
+    }
+    setIsLoading(false);
+  }, []);
+
+  const hasPlan = !!state?.plans?.length && !showInitialSetup;
 
   const toggleDone = useCallback((dayIdx: number, qid: string) => {
     if (!state) return;
@@ -70,6 +83,7 @@ export default function Page() {
   const resetAll = useCallback(() => {
     setState(null);
     setSelected([]);
+    setShowInitialSetup(true);
     if (typeof window !== "undefined") localStorage.removeItem("growth-planner-v1");
   }, []);
 
@@ -95,18 +109,30 @@ export default function Page() {
     }
   }, [state]);
 
-  // 初回ウィザード（プラン未作成）
-  if (!hasPlan) {
+  // 新しいチャット開始（現在のチャット履歴をリセット）
+  const startNewChat = useCallback(() => {
+    setCurrentChatHistory(null);
+  }, []);
+
+  // ローディング中は何も表示しない
+  if (isLoading) {
+    return null;
+  }
+
+  // 初回ウィザード（3つ選択するまで表示）
+  if (showInitialSetup || !hasPlan) {
     const toggleCategory = (key: CategoryKey) => setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
     const generate = () => {
-      if (selected.length === 0) {
-        alert("最低1つの分野を選択してください");
+      if (selected.length !== 3) {
+        alert("ちょうど3つの分野を選択してください");
         return;
       }
+      
       const plans = buildWeekPlan(selected);
       const next: AppState = { selectedCategories: selected, plans, createdAt: new Date().toISOString() };
       setState(next);
       saveState(next);
+      setShowInitialSetup(false);
     };
     return (
       <main className="mx-auto max-w-screen-sm p-4 transition-colors" style={{
@@ -114,7 +140,7 @@ export default function Page() {
         color: "#111111"
       }}>
         <h1 className="mb-4 text-xl font-semibold">どんな分野を伸ばしたい？</h1>
-        <p className="mb-3 text-sm text-neutral-600">3つ前後選ぶのがおすすめ（後で変更できます）</p>
+        <p className="mb-3 text-sm text-neutral-600">ちょうど3つ選択してください（後で変更できます）</p>
         <div className="grid grid-cols-3 gap-3">
           {ALL_CATEGORIES.map((c) => {
             const active = selected.includes(c.key);
@@ -126,20 +152,20 @@ export default function Page() {
         <div className="mt-6 space-y-3">
           {selected.length > 0 && (
             <div className="text-sm text-neutral-600">
-              選択中: {selected.join("、")} ({selected.length}個)
+              選択中: {selected.join("、")} ({selected.length}/3個)
             </div>
           )}
           <div className="flex items-center justify-between">
             <button 
               onClick={generate} 
-              disabled={selected.length === 0}
+              disabled={selected.length !== 3}
               className={`rounded-xl px-4 py-2 shadow transition ${
-                selected.length === 0 
+                selected.length !== 3 
                   ? "bg-neutral-300 text-neutral-500 cursor-not-allowed" 
                   : "bg-neutral-900 text-white hover:bg-neutral-800"
               }`}
             >
-              7日間プランを作成 {selected.length === 0 ? "(分野を選択してください)" : ""}
+              7日間プランを作成 {selected.length !== 3 ? `(${3 - selected.length}個追加で選択してください)` : ""}
             </button>
             {selected.length > 0 && (
               <button onClick={() => setSelected([])} className="text-sm text-neutral-600 underline underline-offset-4 hover:text-neutral-800">
@@ -179,14 +205,38 @@ export default function Page() {
         {tab === "クエスト" && (
           <QuestView plans={state!.plans} todayIndex={todayIndex} onToggleDone={toggleDone} onToggleEnabled={toggleEnabled} onToggleDayEnabled={setDayEnabledAll} theme={state!.theme} />
         )}
-        {tab === "チャット" && <ChatView onAddQuest={addQuestToPlans} theme={state!.theme} />}
-        {tab === "設定" && (
+        {tab === "チャット" && !showChatHistory && (
+          <ChatView 
+            onAddQuest={addQuestToPlans} 
+            theme={state!.theme} 
+            initialMessages={currentChatHistory?.messages}
+            currentHistoryId={currentChatHistory?.id}
+            onShowChatHistories={() => setShowChatHistory(true)}
+            onStartNewChat={startNewChat}
+          />
+        )}
+        {showChatHistory && (
+          <ChatHistoryView
+            onBack={() => setShowChatHistory(false)}
+            onLoadChatHistory={(history) => {
+              setCurrentChatHistory(history);
+              setShowChatHistory(false);
+              setTab("チャット");
+            }}
+          />
+        )}
+        {tab === "設定" && !showChatHistory && (
           <SettingsView
             onReset={resetAll}
             theme={state!.theme ?? (DEFAULT_THEME as Theme)}
             onThemeChange={(theme) => {
               setState((prev) => (prev ? { ...prev, theme } : null));
               if (state) saveState({ ...state, theme });
+            }}
+            onShowChatHistories={() => setShowChatHistory(true)}
+            onLoadChatHistory={(history) => {
+              setCurrentChatHistory(history);
+              setTab("チャット");
             }}
           />
         )}

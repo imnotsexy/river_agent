@@ -4,40 +4,110 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   Circle,
-  Ellipsis,
   Plus,
   Smile,
   Send,
   Paperclip,
   X,
+  History,
+  Settings,
+  List,
+  FileText,
+  MessageSquarePlus,
 } from "lucide-react";
-import type { ChatMsg, CategoryKey, Theme } from "@/utils/types";
+import type { ChatMsg, ChatRole, CategoryKey, Theme, ChatHistory } from "@/utils/types";
 import { ALL_CATEGORIES, TEMPLATE_QUESTS } from "@/utils/constants";
 import { VoiceInput } from "./VoiceInput";
 import { FileAttachment } from "./FileAttachment";
+import { createChatHistory, saveChatHistory, getChatHistory } from "@/utils/chatHistory";
+import { detectLocation, generateMapUrl, addMapLinkToText } from "@/utils/locationUtils";
 
 export const ChatView = memo(function ChatView({
   onReplaceQuest, // 親へ置き換え依頼するコールバック
   onAddQuest, // 親へクエスト追加依頼するコールバック
   theme, // テーマ設定
+  initialMessages, // 初期メッセージ（履歴読み込み用）
+  currentHistoryId, // 現在のトーク履歴ID
+  onShowChatHistories, // トーク履歴一覧を表示するコールバック
+  onStartNewChat, // 新しいチャット開始のコールバック
 }: {
   onReplaceQuest?: (payload: { category: CategoryKey; newTitle: string }) => void;
   onAddQuest?: (questTitle: string, dayIndex: number, category?: CategoryKey) => void;
   theme?: Theme;
+  initialMessages?: ChatMsg[];
+  currentHistoryId?: string;
+  onShowChatHistories?: () => void;
+  onStartNewChat?: () => void;
 }) {
   const isDark = theme?.backgroundColor === "#000000";
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    { role: "assistant", content: "River Agentです！ 何でもお聞きください 🤖" },
-    { role: "assistant", content: "こんにちは！今日はどのようなことでお手伝いできますか？" },
-  ]);
+  const [messages, setMessages] = useState<ChatMsg[]>(
+    initialMessages || [
+      { role: "assistant", content: "River Agentです！ 何でもお聞きください 🤖" },
+      { role: "assistant", content: "こんにちは！今日はどのようなことでお手伝いできますか？" },
+    ]
+  );
   const [isTyping, setIsTyping] = useState(false);
   const [suggestedQuests, setSuggestedQuests] = useState<string[]>([]);
+  const [historyId, setHistoryId] = useState<string | null>(currentHistoryId || null);
+  const [responseFormat, setResponseFormat] = useState<"bullet" | "free">(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("chat-response-format") as "bullet" | "free") || "free";
+    }
+    return "free";
+  });
+  const [showFormatSettings, setShowFormatSettings] = useState(false);
+
+  // 回答形式の変更を保存
+  const handleFormatChange = (format: "bullet" | "free") => {
+    setResponseFormat(format);
+    setShowFormatSettings(false);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("chat-response-format", format);
+    }
+  };
 
   // クエスト追加パネル
   const [openEdit, setOpenEdit] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // 新しいチャット開始関数
+  const handleStartNewChat = () => {
+    // 現在のチャットを履歴に保存
+    if (messages.length > 2) { // 初期メッセージより多い場合のみ保存
+      saveToHistory(messages);
+    }
+    
+    // 新しいチャット開始のコールバック呼び出し
+    if (onStartNewChat) {
+      onStartNewChat();
+    }
+  };
+
+  // トーク履歴保存関数
+  const saveToHistory = (msgs: ChatMsg[]) => {
+    if (msgs.length <= 2) return; // 初期メッセージのみの場合は保存しない
+    
+    try {
+      if (historyId) {
+        // 既存履歴の更新
+        const history = getChatHistory(historyId);
+        if (history) {
+          history.messages = msgs;
+          history.updatedAt = new Date().toISOString();
+          saveChatHistory(history);
+        }
+      } else {
+        // 新規履歴の作成
+        const newHistory = createChatHistory(msgs);
+        saveChatHistory(newHistory);
+        setHistoryId(newHistory.id);
+      }
+    } catch (error) {
+      console.error('トーク履歴の保存に失敗しました:', error);
+    }
+  };
 
   // AIの応答からクエスト提案を抽出する関数
   const extractQuestSuggestions = (content: string): string[] => {
@@ -93,17 +163,25 @@ export const ChatView = memo(function ChatView({
     try {
       const apiKey = localStorage.getItem("openai_api_key");
       
+      // 回答形式に応じてメッセージを調整
+      const formatInstruction = responseFormat === "bullet" 
+        ? "\n\n【回答形式】箇条書きで100文字以内で簡潔に回答してください。"
+        : "";
+      
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: t, apiKey }),
+        body: JSON.stringify({ 
+          message: t + formatInstruction, 
+          apiKey 
+        }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        const assistantMessage = { role: "assistant", content: data.response };
+        const assistantMessage: ChatMsg = { role: "assistant" as ChatRole, content: data.response };
         setMessages((prev) => [...prev, assistantMessage]);
         
         // AIの応答からクエスト提案を抽出
@@ -111,12 +189,18 @@ export const ChatView = memo(function ChatView({
         if (suggestions.length > 0) {
           setSuggestedQuests(suggestions);
         }
+
+        // トーク履歴を保存
+        setTimeout(() => {
+          const updatedMessages = [...messages, newMessage, assistantMessage];
+          saveToHistory(updatedMessages);
+        }, 100);
       } else {
-        setMessages((prev) => [...prev, { role: "assistant", content: "申し訳ございませんが、現在応答できません。しばらくしてから再度お試しください。" }]);
+        setMessages((prev) => [...prev, { role: "assistant" as ChatRole, content: "申し訳ございませんが、現在応答できません。しばらくしてから再度お試しください。" }]);
       }
     } catch (error) {
       console.error('チャットエラー:', error);
-      setMessages((prev) => [...prev, { role: "assistant", content: "エラーが発生しました。しばらくしてから再度お試しください。" }]);
+      setMessages((prev) => [...prev, { role: "assistant" as ChatRole, content: "エラーが発生しました。しばらくしてから再度お試しください。" }]);
     } finally {
       setIsTyping(false);
     }
@@ -125,6 +209,19 @@ export const ChatView = memo(function ChatView({
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping, openEdit, selectedCategory]);
+
+  // 設定パネル外クリックで閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (showFormatSettings && !target.closest('[data-format-settings]')) {
+        setShowFormatSettings(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showFormatSettings]);
 
   const categoryButtons = useMemo(
     () =>
@@ -187,14 +284,75 @@ export const ChatView = memo(function ChatView({
           </div>
           <div className="flex-1">
             <div className="text-base font-semibold leading-5">River Agent</div>
-            <div className="text-xs text-neutral-500">オンライン</div>
+            <div className="text-xs text-neutral-500">
+              オンライン • {responseFormat === "bullet" ? "箇条書き" : "自由形式"}
+            </div>
           </div>
-          <button
-            className="rounded-full p-2 text-neutral-500 hover:bg-neutral-100"
-            aria-label="メニュー"
-          >
-            <Ellipsis className="h-5 w-5" aria-hidden />
-          </button>
+          <div className="flex items-center gap-1">
+            <div className="relative" data-format-settings>
+              <button
+                onClick={() => setShowFormatSettings(!showFormatSettings)}
+                className="rounded-full p-2 text-neutral-500 hover:bg-neutral-100"
+                aria-label="回答形式設定"
+                title="回答形式を変更"
+                data-format-settings
+              >
+                <Settings className="h-4 w-4" aria-hidden />
+              </button>
+              
+              {showFormatSettings && (
+                <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border bg-white p-2 shadow-lg z-10" data-format-settings>
+                  <div className="text-xs font-medium text-neutral-700 mb-2">回答形式を選択</div>
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => handleFormatChange("bullet")}
+                      className={`w-full flex items-center gap-2 p-2 text-sm rounded transition ${
+                        responseFormat === "bullet" 
+                          ? "bg-blue-50 text-blue-700 border border-blue-200" 
+                          : "hover:bg-neutral-50"
+                      }`}
+                    >
+                      <List className="h-4 w-4" />
+                      <div className="text-left">
+                        <div className="font-medium">箇条書き</div>
+                        <div className="text-xs text-neutral-500">100文字以内で簡潔に</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => handleFormatChange("free")}
+                      className={`w-full flex items-center gap-2 p-2 text-sm rounded transition ${
+                        responseFormat === "free" 
+                          ? "bg-blue-50 text-blue-700 border border-blue-200" 
+                          : "hover:bg-neutral-50"
+                      }`}
+                    >
+                      <FileText className="h-4 w-4" />
+                      <div className="text-left">
+                        <div className="font-medium">自由形式</div>
+                        <div className="text-xs text-neutral-500">詳細な回答</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={handleStartNewChat}
+              className="rounded-full p-2 text-neutral-500 hover:bg-neutral-100"
+              aria-label="新しいチャット"
+              title="新しいチャットを開始"
+            >
+              <MessageSquarePlus className="h-5 w-5" aria-hidden />
+            </button>
+            <button
+              onClick={onShowChatHistories}
+              className="rounded-full p-2 text-neutral-500 hover:bg-neutral-100"
+              aria-label="トーク履歴"
+              title="トーク履歴一覧"
+            >
+              <History className="h-5 w-5" aria-hidden />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -251,31 +409,52 @@ export const ChatView = memo(function ChatView({
               </button>
             </div>
             <div className="space-y-2">
-              {suggestedQuests.map((quest, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between gap-2 rounded-lg bg-white p-2 shadow-sm"
-                >
-                  <span className="text-sm text-gray-800 flex-1">{quest}</span>
-                  <div className="flex gap-1">
-                    {[0, 1, 2, 3, 4, 5, 6].map(dayIndex => (
+              {suggestedQuests.map((quest, index) => {
+                const location = detectLocation(quest);
+                return (
+                  <div
+                    key={index}
+                    className="flex items-start justify-between gap-2 rounded-lg bg-white p-3 shadow-sm"
+                  >
+                    <div className="flex-1">
+                      <span className="text-sm text-gray-800 block mb-2">{quest}</span>
+                      {location && (
+                        <a
+                          href={generateMapUrl(location)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 underline"
+                        >
+                          📍 {location}をマップで見る
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
                       <button
-                        key={dayIndex}
+                        onClick={() => setSuggestedQuests(prev => prev.filter((_, i) => i !== index))}
+                        className="text-xl hover:scale-110 transition-transform"
+                        title="このクエストを却下"
+                      >
+                        ❌
+                      </button>
+                      <button
                         onClick={() => {
+                          // クエスト承認時の処理（今日に追加）
+                          const today = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1; // 月曜日を0とする
                           if (onAddQuest) {
-                            onAddQuest(quest, dayIndex, "習慣");
+                            onAddQuest(quest, today, "習慣");
                             setSuggestedQuests(prev => prev.filter((_, i) => i !== index));
                           }
                         }}
-                        className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
-                        title={`Day ${dayIndex + 1}に追加`}
+                        className="text-xl hover:scale-110 transition-transform"
+                        title="このクエストを承認して今日に追加"
                       >
-                        {dayIndex + 1}
+                        🔵
                       </button>
-                    ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -341,13 +520,39 @@ const BotBubble = memo(function BotBubble({
 }: {
   children: React.ReactNode;
 }) {
+  // Markdownの基本的な変換
+  const formatMessage = (text: string) => {
+    // 場所検出とMapリンク追加
+    const { text: textWithMap, hasMap } = addMapLinkToText(text);
+    
+    // 改行を<br>に変換
+    const lines = textWithMap.split('\n');
+    return lines.map((line, index) => {
+      // 見出し（###）を削除
+      line = line.replace(/^#{1,6}\s+/, '');
+      // 太字（**text**）を処理
+      line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      // リスト項目（- または *）を処理
+      if (line.match(/^[\-\*]\s+/)) {
+        line = '• ' + line.replace(/^[\-\*]\s+/, '');
+      }
+      
+      return (
+        <span key={index}>
+          <span dangerouslySetInnerHTML={{ __html: line }} />
+          {index < lines.length - 1 && <br />}
+        </span>
+      );
+    });
+  };
+  
   return (
     <div className="flex items-start gap-2">
       <div className="mt-0.5 overflow-hidden rounded-full ring-1 ring-black/5">
         <Image src="/favicon.ico" alt="River Agent" width={32} height={32} className="h-8 w-8" />
       </div>
       <div className="max-w-[85%] rounded-2xl bg-white px-3 py-2 text-sm shadow ring-1 ring-black/5">
-        {children}
+        {typeof children === 'string' ? formatMessage(children) : children}
       </div>
     </div>
   );
@@ -441,14 +646,24 @@ const ChatInput = memo(function ChatInput({
   const [text, setText] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [showAttachments, setShowAttachments] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const send = () => {
     const t = text.trim();
     if (!t && attachedFiles.length === 0) return;
+    
     onSubmit(t, attachedFiles);
+    
+    // 入力をクリア
     setText("");
     setAttachedFiles([]);
     setShowAttachments(false);
+    
+    // refを使って直接クリア
+    if (inputRef.current) {
+      inputRef.current.value = "";
+      inputRef.current.focus();
+    }
   };
 
   const handleVoiceResult = (voiceText: string) => {
@@ -487,6 +702,7 @@ const ChatInput = memo(function ChatInput({
           <Plus className="h-5 w-5" aria-hidden />
         </button>
         <input
+          ref={inputRef}
           className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400/40"
           placeholder="メッセージを入力…"
           value={text}

@@ -2,6 +2,7 @@
 import { memo, useMemo, useState } from "react";
 import type { DayPlan, Theme } from "@/utils/types";
 import { POINTS_PER_QUEST, DAILY_BONUS_POINTS } from "@/utils/constants";
+import { detectLocation, generateMapUrl } from "@/utils/locationUtils";
 
 type ViewMode = "today" | "week";
 
@@ -159,6 +160,21 @@ export const QuestView = memo(function QuestView({
                                 {q.note ? ` ・ ${q.note}` : ""}
                               </p>
                             )}
+                            {/* 場所検出とMapリンク表示 */}
+                            {(() => {
+                              const location = detectLocation(q.title);
+                              return location ? (
+                                <a
+                                  href={generateMapUrl(location)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 underline mt-1"
+                                >
+                                  📍 {location}をマップで見る
+                                </a>
+                              ) : null;
+                            })()}
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="whitespace-nowrap rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
