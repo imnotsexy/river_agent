@@ -13,7 +13,8 @@ import {
   Settings,
   List,
   FileText,
-  MessageSquarePlus,
+  MessageSquarePlus, 
+  CircleCheck,
 } from "lucide-react";
 import type { ChatMsg, ChatRole, CategoryKey, Theme, ChatHistory } from "@/utils/types";
 import { ALL_CATEGORIES, TEMPLATE_QUESTS } from "@/utils/constants";
@@ -247,23 +248,41 @@ export const ChatView = memo(function ChatView({
     return TEMPLATE_QUESTS[selectedCategory];
   }, [selectedCategory]);
 
-  const applyReplacement = (title: string) => {
-    if (selectedCategory) {
-      if (onReplaceQuest) {
-        onReplaceQuest({ category: selectedCategory, newTitle: title });
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `カテゴリ「${selectedCategory}」のクエスト"${title}"を追加しました。`,
-          },
-        ]);
-      }
-      setOpenEdit(false);
-      setSelectedCategory(null);
-    }
-  };
+  // ChatView 内の関数を差し替え
+const applyReplacement = (title: string) => {
+  // 月曜=0, ... 日曜=6
+  const today = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+  const cat: CategoryKey = selectedCategory ?? "習慣";
+
+  if (onAddQuest) {
+    // その日の plans に本物のクエストとして追加
+    onAddQuest(title, today, cat);
+
+    // ついでに軽いフィードバックをチャットに表示（任意）
+    setMessages(prev => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `カテゴリ「${cat}」のクエスト「${title}」を今日のクエストに追加しました。`,
+      },
+    ]);
+  } else if (onReplaceQuest && selectedCategory) {
+    // 予備動作：もし置換モードを使いたいプロジェクト構成ならこちら
+    onReplaceQuest({ category: selectedCategory, newTitle: title });
+  } else {
+    // どちらも無い場合のフォールバック
+    setMessages(prev => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `カテゴリ「${cat}」のクエスト「${title}」を追加（仮）。`,
+      },
+    ]);
+  }
+
+  setOpenEdit(false);
+  setSelectedCategory(null);
+};
 
   return (
     <section className="my-2 space-y-3">
@@ -430,28 +449,30 @@ export const ChatView = memo(function ChatView({
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setSuggestedQuests(prev => prev.filter((_, i) => i !== index))}
-                        className="text-xl hover:scale-110 transition-transform"
-                        title="このクエストを却下"
-                      >
-                        ❌
-                      </button>
-                      <button
-                        onClick={() => {
-                          // クエスト承認時の処理（今日に追加）
-                          const today = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1; // 月曜日を0とする
-                          if (onAddQuest) {
-                            onAddQuest(quest, today, "習慣");
-                            setSuggestedQuests(prev => prev.filter((_, i) => i !== index));
-                          }
-                        }}
-                        className="text-xl hover:scale-110 transition-transform"
-                        title="このクエストを承認して今日に追加"
-                      >
-                        🔵
-                      </button>
-                    </div>
+                    {/* 却下ボタン */}
+                    <button
+                      onClick={() => setSuggestedQuests(prev => prev.filter((_, i) => i !== index))}
+                      className="text-xl hover:scale-110 transition-transform"
+                      title="このクエストを却下"
+                    >
+                      <X className="w-5 h-5 text-rose-500" />
+                    </button>
+
+                    {/* 承認ボタン */}
+                    <button
+                      onClick={() => {
+                        const today = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+                        if (onAddQuest) {
+                          onAddQuest(quest, today, "習慣");
+                          setSuggestedQuests(prev => prev.filter((_, i) => i !== index));
+                        }
+                      }}
+                      className="text-xl hover:scale-110 transition-transform"
+                      title="このクエストを承認して今日に追加"
+                    >
+                      <Circle className="w-5 h-5 text-blue-500" />
+                    </button>
+                  </div>
                   </div>
                 );
               })}

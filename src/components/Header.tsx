@@ -6,11 +6,15 @@ export const Header = memo(function Header() {
   const [open, setOpen] = useState(false);
 
   // 仮の通知データ（本番は props や API から渡す）
-  const notifications = [
-    { id: 1, text: "今日1日頑張ってください！" },
-    { id: 2, text: "クエスト『運動』が未実行です" },
-    { id: 3, text: "全クエスト達成で+50pt 獲得できます" },
-  ];
+const notifications = [
+  { id: 1, text: "今日1日、少しずつで大丈夫。一歩ずつ進んでいきましょう！" },
+  { id: 2, text: "できたことを振り返って、自分を褒めてあげてください" },
+  { id: 3, text: "全クエスト達成で+50pt 獲得できます。コツコツ続けて大きな成果に！" },
+  { id: 4, text: "完璧じゃなくていい。挑戦した時点で前進しています" },
+  { id: 5, text: "あなたの努力は必ず積み重なり、未来の計画性につながります" },
+  { id: 6, text: "休憩も大事なクエストです。自分を大切にしましょう" },
+];
+
 
   return (
     <header className="relative mb-4 flex items-center justify-between">
